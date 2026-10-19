@@ -48,7 +48,8 @@ c.email is null or trim(c.email) = ''
  -- Return only invalid records.
 -- Create a validation_error column using CASE.
 --===========================================================================
-SELECT
+WITH validated_order_items AS(
+	SELECT
     oi.order_item_id,
     oi.order_id,
     oi.product_id,
@@ -61,3 +62,7 @@ SELECT
             THEN 'INVALID_UNIT_PRICE'
     END AS validation_error
 FROM source.order_items AS oi
+)
+select * 
+from validated_order_items
+where validation_error is not null;
