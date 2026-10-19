@@ -48,35 +48,4 @@ on conflict (pipeline_name)
 do update set 
 last_processed_at = excluded.last_processed_at
 
---===========================================================================
--- Transaction-safe incremental load
--- Perform the target load and watermark update as one atomic transaction.
---===========================================================================
-    -- Step1: laod/upsert customers into warehouse
-insert into warehouse.dim_customer(
-    customer_id,
-    first_name,
-    last_name,
-    email,
-    country
-)
-select customer_id, first_name,last_name,email,country 
-from staging.customers
-on conflict (customer_id)
-do update set 
-    first_name = excluded.first_name,
-    last_name = excluded.last_name,
-    email = excluded.email,
-    country = excluded.country
 
--- Step2: Update the watermark
-insert into staging.pipeline_watermark(
-    pipeline_name, 
-    last_processed_at
-)
-select 'customers_incremental_load',
-        max(source_updated_at)
-from staging.customers
-on conflict(pipeline_name)
-do update set 
-    last_processed_at = excluded.last_processed_at
