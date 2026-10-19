@@ -77,6 +77,6 @@ insert into staging.pipeline_watermark(
 select 'customers_incremental_load',
         max(source_updated_at)
 from staging.customers
-on conflict(customer_id)
+on conflict(pipeline_name)
 do update set 
     last_processed_at = excluded.last_processed_at
