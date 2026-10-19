@@ -200,6 +200,151 @@ select ch.customer_id,ch.first_name, ch.last_name,ch.email, ch.country, ch.sourc
 from detect_changes as ch 
 where ch.change_type in ('INSERT', 'CHANGED')
 
+
+
+ ============================================================
+-- SCD TYPE 2 — CUSTOMER DIMENSION
+-- ============================================================
+-- Assumptions:
+-- 1. staging.customers contains source_updated_at.
+-- 2. source_updated_at is NOT NULL for eligible records.
+-- 3. This load maintains the latest customer state.
+-- 4. Historical changes arriving out of order require
+--    separate handling.
+-- ============================================================
+
+BEGIN;
+
+-- ============================================================
+-- STEP 1: Identify NEW and CHANGED customers
+-- ============================================================
+
+CREATE TEMP TABLE customer_changes
+ON COMMIT DROP
+AS
+
+WITH ranked_customers AS (
+    SELECT
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        c.email,
+        c.country,
+        c.source_updated_at,
+
+        ROW_NUMBER() OVER (
+            PARTITION BY c.customer_id
+            ORDER BY
+                c.source_updated_at DESC,
+                c.first_name DESC NULLS LAST,
+                c.last_name DESC NULLS LAST,
+                c.email DESC NULLS LAST,
+                c.country DESC NULLS LAST
+        ) AS rn
+
+    FROM staging.customers AS c
+    WHERE c.customer_id IS NOT NULL
+      AND c.source_updated_at IS NOT NULL
+),
+
+latest_customers AS (
+    SELECT
+        customer_id,
+        first_name,
+        last_name,
+        email,
+        country,
+        source_updated_at
+    FROM ranked_customers
+    WHERE rn = 1
+),
+
+detect_changes AS (
+    SELECT
+        s.customer_id,
+        s.first_name,
+        s.last_name,
+        s.email,
+        s.country,
+        s.source_updated_at,
+
+        CASE
+            WHEN d.customer_id IS NULL
+                THEN 'INSERT'
+
+            WHEN (
+                s.first_name,
+                s.last_name,
+                s.email,
+                s.country
+            ) IS DISTINCT FROM (
+                d.first_name,
+                d.last_name,
+                d.email,
+                d.country
+            )
+            AND s.source_updated_at > d.effective_from
+                THEN 'CHANGED'
+
+            ELSE 'SKIP'
+        END AS change_type
+
+    FROM latest_customers AS s
+
+    LEFT JOIN warehouse.dim_customer AS d
+        ON s.customer_id = d.customer_id
+       AND d.is_current = TRUE
+)
+
+SELECT *
+FROM detect_changes
+WHERE change_type IN ('INSERT', 'CHANGED');
+
+
+-- STEP 2: Expire existing versions for CHANGED customers
+
+
+UPDATE warehouse.dim_customer AS d
+SET
+    effective_to = c.source_updated_at,
+    is_current = FALSE
+
+FROM customer_changes AS c
+
+WHERE d.customer_id = c.customer_id
+  AND d.is_current = TRUE
+  AND c.change_type = 'CHANGED';
+
+-- STEP 3: Insert NEW customers and new CHANGED versions
+
+
+INSERT INTO warehouse.dim_customer (
+    customer_id,
+    first_name,
+    last_name,
+    email,
+    country,
+    effective_from,
+    effective_to,
+    is_current
+)
+
+SELECT
+    c.customer_id,
+    c.first_name,
+    c.last_name,
+    c.email,
+    c.country,
+    c.source_updated_at,
+    NULL,
+    TRUE
+
+FROM customer_changes AS c;
+
+-- STEP 4: Commit both operations atomically
+
+COMMIT;
+
 --===========================================================================
 -- Fact table loading and surrogate-key lookup
 --===========================================================================
