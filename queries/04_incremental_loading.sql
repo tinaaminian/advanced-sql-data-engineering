@@ -53,7 +53,7 @@ last_processed_at = excluded.last_processed_at
 -- Perform the target load and watermark update as one atomic transaction.
 --===========================================================================
     -- Step1: laod/upsert customers into warehouse
-insert into warehouse.customers(
+insert into warehouse.dim_customer(
     customer_id,
     first_name,
     last_name,
