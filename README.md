@@ -67,8 +67,6 @@ Connect to the database using DBeaver or another PostgreSQL client.
 
 Run the scripts in the `setup/` directory to initialize the database, then explore the SQL files in `queries/`.
 
-Some queries modify warehouse data, so they should be executed against the local practice database.
-
 To stop the container:
 
 ```bash
